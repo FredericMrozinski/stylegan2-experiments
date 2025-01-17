@@ -5,7 +5,7 @@
 # and any modifications thereto.  Any use, reproduction, disclosure or
 # distribution of this software and related documentation without an express
 # license agreement from NVIDIA CORPORATION is strictly prohibited.
-
+import math
 import os
 import numpy as np
 import zipfile
@@ -243,9 +243,6 @@ class StructuredImageFolderDataset(Dataset):
         self._path = path
         self.img_file_class_list = []
 
-        if resolution:
-            print("WARNING: resolution parameter is ignored in this implementation/adaption.")
-
         # Make idx-class-bounds map
         dir_content = os.listdir(path)
         class_count = 0
@@ -264,15 +261,47 @@ class StructuredImageFolderDataset(Dataset):
         name = os.path.splitext(os.path.basename(self._path))[0]
         raw_shape = [len(self.img_file_class_list)] + list(self._load_raw_image(0).shape)
         print("WARNING: Assuming all the images in StructuredImageFolderDataset to be of same size/dimensionality.")
+
+        if resolution is not None and (raw_shape[2] != resolution or raw_shape[3] != resolution):
+            raise IOError('Image files do not match the specified resolution')
+
         super().__init__(name=name, raw_shape=raw_shape, **super_kwargs)
+
+    # def _load_raw_image(self, raw_idx):
+    #     fname = self.img_file_class_list[raw_idx][0]
+    #     with open(fname, 'rb') as f:
+    #         if pyspng is not None and self._file_ext(fname) == '.png':
+    #             image = pyspng.load(f.read())
+    #         else:
+    #             image = np.array(PIL.Image.open(f))
+    #     if image.ndim == 2:
+    #         image = image[:, :, np.newaxis]  # HW => HWC
+    #     image = image.transpose(2, 0, 1)  # HWC => CHW
+    #     return image
 
     def _load_raw_image(self, raw_idx):
         fname = self.img_file_class_list[raw_idx][0]
         with open(fname, 'rb') as f:
             if pyspng is not None and self._file_ext(fname) == '.png':
                 image = pyspng.load(f.read())
+                # Convert numpy array to PIL Image for resizing
+                image = PIL.Image.fromarray(image)
             else:
-                image = np.array(PIL.Image.open(f))
+                image = PIL.Image.open(f)
+
+            # Check if image resolution is power of two, if not upscale
+            if image.size[0] != image.size[1]:
+                raise ValueError("Only accepting quadratic images.")
+
+            target_img_size = image.size[0]
+            if target_img_size & (target_img_size - 1) != 0:
+                target_img_size = 1 if target_img_size == 0 else 2 ** math.ceil(math.log2(target_img_size))
+
+            # Resize the image to target resolution
+            image = image.resize((target_img_size, target_img_size), PIL.Image.Resampling.LANCZOS)
+            # Convert back to numpy array
+            image = np.array(image)
+
         if image.ndim == 2:
             image = image[:, :, np.newaxis]  # HW => HWC
         image = image.transpose(2, 0, 1)  # HWC => CHW
