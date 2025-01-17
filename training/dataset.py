@@ -234,3 +234,52 @@ class ImageFolderDataset(Dataset):
         return labels
 
 #----------------------------------------------------------------------------
+
+class StructuredImageFolderDataset(Dataset):
+    def __init__(self,
+                 path,
+                 resolution=None,
+                 **super_kwargs, ):
+        self._path = path
+        self.img_file_class_list = []
+
+        if resolution:
+            print("WARNING: resolution parameter is ignored in this implementation/adaption.")
+
+        # Make idx-class-bounds map
+        dir_content = os.listdir(path)
+        class_count = 0
+        for dir_content in dir_content:
+            class_dir = os.path.join(path, dir_content)
+            if os.path.isdir(class_dir):
+                potential_images = os.listdir(class_dir)
+                for potential_image in potential_images:
+                    potential_image_path = os.path.join(class_dir, potential_image)
+                    if not os.path.isdir(potential_image_path):
+                        file_ext = os.path.splitext(potential_image_path)[1][1:]
+                        if file_ext.lower() in ["jpg", "jpeg", "png", "tif", "tiff"]:
+                            self.img_file_class_list.append((potential_image_path, class_count))
+            class_count += 1
+
+        name = os.path.splitext(os.path.basename(self._path))[0]
+        raw_shape = [len(self.img_file_class_list)] + list(self._load_raw_image(0).shape)
+        print("WARNING: Assuming all the images in StructuredImageFolderDataset to be of same size/dimensionality.")
+        super().__init__(name=name, raw_shape=raw_shape, **super_kwargs)
+
+    def _load_raw_image(self, raw_idx):
+        fname = self.img_file_class_list[raw_idx][0]
+        with open(fname, 'rb') as f:
+            if pyspng is not None and self._file_ext(fname) == '.png':
+                image = pyspng.load(f.read())
+            else:
+                image = np.array(PIL.Image.open(f))
+        if image.ndim == 2:
+            image = image[:, :, np.newaxis]  # HW => HWC
+        image = image.transpose(2, 0, 1)  # HWC => CHW
+        return image
+
+    def _load_raw_labels(self):
+        labels = [img[1] for img in self.img_file_class_list]
+        labels = np.array(labels)
+        labels = labels.astype({1: np.int64, 2: np.float32}[labels.ndim])
+        return labels
